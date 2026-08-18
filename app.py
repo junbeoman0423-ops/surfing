@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-import pydeck as pdk
 import time
 
 # =====================================================================
@@ -189,7 +188,6 @@ SPOTS = {
     "태안 (만리포해수욕장)":     {"lat": 36.782, "lon": 126.138, "angle": 260, "bottom": "sand",   "rip": False},
     "부산 (송정해수욕장)":       {"lat": 35.178, "lon": 129.199, "angle": 140, "bottom": "sand",   "rip": False},
     "부산 (다대포해수욕장)":     {"lat": 35.049, "lon": 128.966, "angle": 190, "bottom": "sand",   "rip": True},
-    "부산 (임랑해수욕장)":       {"lat": 35.360, "lon": 129.239, "angle": 100, "bottom": "sand",   "rip": False},
     "제주 (중문해수욕장)":       {"lat": 33.244, "lon": 126.412, "angle": 180, "bottom": "reef",   "rip": False},
     "제주 (월정리해변)":         {"lat": 33.556, "lon": 126.796, "angle": 10,  "bottom": "sand",   "rip": False},
     "제주 (이호테우해변)":       {"lat": 33.499, "lon": 126.463, "angle": 340, "bottom": "sand",   "rip": False},
@@ -198,97 +196,24 @@ SPOTS = {
     "제주 (함덕해수욕장)":       {"lat": 33.543, "lon": 126.670, "angle": 15,  "bottom": "sand",   "rip": False},
     "제주 (곽지해수욕장)":       {"lat": 33.450, "lon": 126.310, "angle": 320, "bottom": "sand",   "rip": False},
     "고성 (봉수대해수욕장)":     {"lat": 38.350, "lon": 128.470, "angle": 85,  "bottom": "sand",   "rip": False},
-    "속초 (속초해수욕장)":       {"lat": 38.207, "lon": 128.594, "angle": 80,  "bottom": "sand",   "rip": False},
     "포항 (신항만)":             {"lat": 36.070, "lon": 129.390, "angle": 95,  "bottom": "reef",   "rip": False},
     "경주 (남열해돋이해수욕장)": {"lat": 35.767, "lon": 129.487, "angle": 95,  "bottom": "pebble", "rip": False},
     "삼척 (용화해변)":           {"lat": 37.219, "lon": 129.313, "angle": 85,  "bottom": "sand",   "rip": False},
     "삼척 (맹방해변)":           {"lat": 37.315, "lon": 129.198, "angle": 85,  "bottom": "sand",   "rip": False},
-    "남해 (상주은모래비치)":     {"lat": 34.812, "lon": 127.926, "angle": 190, "bottom": "sand",   "rip": False},
-    "여수 (만성리해수욕장)":     {"lat": 34.766, "lon": 127.766, "angle": 200, "bottom": "sand",   "rip": False},
-    "거제 (학동몽돌해변)":       {"lat": 34.774, "lon": 128.638, "angle": 160, "bottom": "pebble", "rip": False},
 }
 
 # 스팟별 지역 그룹 (추천 스팟이 속한 지역만 지도에서 확대해서 보여주기 위함)
 REGION_OF = {
     "양양 (죽도해수욕장)": "강원", "양양 (기사문해변)": "강원", "양양 (인구해변)": "강원",
     "강릉 (금진해변)": "강원", "강릉 (경포해변)": "강원",
-    "고성 (봉수대해수욕장)": "강원", "속초 (속초해수욕장)": "강원",
-    "삼척 (용화해변)": "강원", "삼척 (맹방해변)": "강원",
+    "고성 (봉수대해수욕장)": "강원", "삼척 (용화해변)": "강원", "삼척 (맹방해변)": "강원",
     "태안 (만리포해수욕장)": "충남",
-    "부산 (송정해수욕장)": "부산", "부산 (다대포해수욕장)": "부산", "부산 (임랑해수욕장)": "부산",
+    "부산 (송정해수욕장)": "부산", "부산 (다대포해수욕장)": "부산",
     "제주 (중문해수욕장)": "제주", "제주 (월정리해변)": "제주", "제주 (이호테우해변)": "제주",
     "제주 (삼양검은모래해변)": "제주", "제주 (사계해변)": "제주",
     "제주 (함덕해수욕장)": "제주", "제주 (곽지해수욕장)": "제주",
     "포항 (신항만)": "경북", "경주 (남열해돋이해수욕장)": "경북",
-    "남해 (상주은모래비치)": "남해", "여수 (만성리해수욕장)": "남해", "거제 (학동몽돌해변)": "남해",
 }
-
-
-# --- 지도 색상 정의 ---
-COLOR_BEST = [255, 59, 48, 255]      # 빨강 - 오늘의 최적 추천
-COLOR_ADJACENT = [52, 199, 89, 255]  # 초록 - ±1단계 추천
-COLOR_OTHER = [30, 136, 229, 190]    # 파랑 - 그 외 스팟
-
-def build_map_df(coords_map, highlight_map, region_filter=None):
-    """
-    highlight_map: {스팟명: 'best' | 'lower' | 'upper'}
-    region_filter가 주어지면 해당 지역 스팟만 포함한다 (그 지역만 확대해서 보여주기 위함).
-    """
-    rows = []
-    for name, (lat, lon) in coords_map.items():
-        if region_filter is not None and REGION_OF.get(name) != region_filter:
-            continue
-
-        kind = highlight_map.get(name)
-        if kind == "best":
-            color, radius = COLOR_BEST, 900
-        elif kind in ("lower", "upper"):
-            color, radius = COLOR_ADJACENT, 260
-        else:
-            color, radius = COLOR_OTHER, 140
-
-        rows.append({"스팟": name, "lat": lat, "lon": lon, "color": color, "radius": radius})
-    return pd.DataFrame(rows)
-
-def render_pydeck_map(map_df, zoom):
-    if map_df.empty:
-        st.caption("표시할 스팟이 없습니다.")
-        return
-
-    center_lat = map_df["lat"].mean()
-    center_lon = map_df["lon"].mean()
-
-    # radius_min_pixels/radius_max_pixels로 줌 레벨과 무관하게 항상 눈에 보이는 크기를 보장.
-    # 추천 스팟(반경 900)이 다른 스팟(140~260)보다 화면상으로도 뚜렷하게 커 보이도록
-    # radius_max_pixels를 넉넉히 잡음.
-    scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=map_df,
-        get_position="[lon, lat]",
-        get_fill_color="color",
-        get_radius="radius",
-        radius_min_pixels=7,
-        radius_max_pixels=70,
-        pickable=True,
-        stroked=True,
-        get_line_color=[255, 255, 255, 220],
-        line_width_min_pixels=1,
-    )
-    view_state = pdk.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=zoom,
-        pitch=0,
-    )
-    st.pydeck_chart(
-        pdk.Deck(
-            layers=[scatter_layer],
-            initial_view_state=view_state,
-            map_style=None,
-            tooltip={"text": "{스팟}"},
-        ),
-        use_container_width=True,
-    )
 
 # --- 스타일 (바다 배경, 큰 타이틀, 반짝이는 크레딧) ---
 def apply_styles():
@@ -467,30 +392,31 @@ def render_results():
 
     st.markdown("### \U0001F504 내 실력 ±1단계 추천 스팟")
     lower_level, upper_level = user_level_num - 1, user_level_num + 1
-    lower_pick = pick_best_for_level(df, lower_level) if lower_level >= 1 else None
-    upper_pick = pick_best_for_level(df, upper_level) if upper_level <= 5 else None
-
     adj_col1, adj_col2 = st.columns(2)
 
     with adj_col1:
         st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
         if lower_level < 1:
             st.caption("이미 가장 쉬운 Level 1을 선택하셨습니다.")
-        elif lower_pick is None:
-            st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
         else:
-            st.markdown(f"**{lower_pick['스팟']}** ({lower_pick['종합 점수']}점)")
-            st.caption(f"{lower_pick['추천 보드']} · 파고 {lower_pick['파고 (ft)']}ft · {lower_pick['파도 형태']}")
+            pick = pick_best_for_level(df, lower_level)
+            if pick is None:
+                st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
+            else:
+                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
 
     with adj_col2:
         st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
         if upper_level > 5:
             st.caption("이미 가장 어려운 Level 5를 선택하셨습니다.")
-        elif upper_pick is None:
-            st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
         else:
-            st.markdown(f"**{upper_pick['스팟']}** ({upper_pick['종합 점수']}점)")
-            st.caption(f"{upper_pick['추천 보드']} · 파고 {upper_pick['파고 (ft)']}ft · {upper_pick['파도 형태']}")
+            pick = pick_best_for_level(df, upper_level)
+            if pick is None:
+                st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
+            else:
+                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
 
     with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
         bc1, bc2, bc3, bc4, bc5 = st.columns(5)
@@ -516,17 +442,32 @@ def render_results():
 
     with col_map:
         best_region = REGION_OF.get(best_spot['스팟'], None)
-        st.markdown(f"### \u200B{best_region or ''} 지역 확대")
-        st.caption("\U0001F534 오늘의 추천 스팟 · \U0001F7E2 ±1단계 추천 스팟 · \U0001F535 그 외 스팟")
+        st.markdown(f"### \u200B{best_region or ''} 지역 확대 (\U0001F534 = 오늘의 추천 스팟)")
 
-        highlight_map = {best_spot['스팟']: "best"}
-        if lower_pick is not None:
-            highlight_map[lower_pick['스팟']] = "lower"
-        if upper_pick is not None:
-            highlight_map[upper_pick['스팟']] = "upper"
+        map_rows = []
+        for name, (lat, lon) in coords_map.items():
+            # 추천 스팟과 같은 지역의 스팟만 지도에 표시 -> 자동으로 그 지역 범위에 맞춰 확대됨
+            if best_region is not None and REGION_OF.get(name) != best_region:
+                continue
+            is_best = (name == best_spot['스팟'])
+            map_rows.append({
+                "lat": lat, "lon": lon,
+                "color": "#FF3B30" if is_best else "#1E88E5",
+                "size": 3500 if is_best else 700
+            })
+        map_df = pd.DataFrame(map_rows)
+        st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
 
-        region_map_df = build_map_df(coords_map, highlight_map, region_filter=best_region)
-        render_pydeck_map(region_map_df, zoom=8.6)
+        with st.expander("\U0001F30D 전체 20개 스팟 지도 보기"):
+            full_map_rows = []
+            for name, (lat, lon) in coords_map.items():
+                is_best = (name == best_spot['스팟'])
+                full_map_rows.append({
+                    "lat": lat, "lon": lon,
+                    "color": "#FF3B30" if is_best else "#1E88E5",
+                    "size": 4000 if is_best else 900
+                })
+            st.map(pd.DataFrame(full_map_rows), latitude="lat", longitude="lon", color="color", size="size")
 
 # --- 메인 앱 로직 ---
 def main():
