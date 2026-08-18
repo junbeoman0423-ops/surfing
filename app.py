@@ -202,6 +202,19 @@ SPOTS = {
     "삼척 (맹방해변)":           {"lat": 37.315, "lon": 129.198, "angle": 85,  "bottom": "sand",   "rip": False},
 }
 
+# 스팟별 지역 그룹 (추천 스팟이 속한 지역만 지도에서 확대해서 보여주기 위함)
+REGION_OF = {
+    "양양 (죽도해수욕장)": "강원", "양양 (기사문해변)": "강원", "양양 (인구해변)": "강원",
+    "강릉 (금진해변)": "강원", "강릉 (경포해변)": "강원",
+    "고성 (봉수대해수욕장)": "강원", "삼척 (용화해변)": "강원", "삼척 (맹방해변)": "강원",
+    "태안 (만리포해수욕장)": "충남",
+    "부산 (송정해수욕장)": "부산", "부산 (다대포해수욕장)": "부산",
+    "제주 (중문해수욕장)": "제주", "제주 (월정리해변)": "제주", "제주 (이호테우해변)": "제주",
+    "제주 (삼양검은모래해변)": "제주", "제주 (사계해변)": "제주",
+    "제주 (함덕해수욕장)": "제주", "제주 (곽지해수욕장)": "제주",
+    "포항 (신항만)": "경북", "경주 (남열해돋이해수욕장)": "경북",
+}
+
 # --- 스타일 (바다 배경, 큰 타이틀, 반짝이는 크레딧) ---
 def apply_styles():
     st.markdown(
@@ -428,17 +441,33 @@ def render_results():
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     with col_map:
-        st.markdown("### \u200B서핑 스팟 위치 (\U0001F534 = 오늘의 추천 스팟)")
+        best_region = REGION_OF.get(best_spot['스팟'], None)
+        st.markdown(f"### \u200B{best_region or ''} 지역 확대 (\U0001F534 = 오늘의 추천 스팟)")
+
         map_rows = []
         for name, (lat, lon) in coords_map.items():
+            # 추천 스팟과 같은 지역의 스팟만 지도에 표시 -> 자동으로 그 지역 범위에 맞춰 확대됨
+            if best_region is not None and REGION_OF.get(name) != best_region:
+                continue
             is_best = (name == best_spot['스팟'])
             map_rows.append({
                 "lat": lat, "lon": lon,
                 "color": "#FF3B30" if is_best else "#1E88E5",
-                "size": 4000 if is_best else 900
+                "size": 3500 if is_best else 700
             })
         map_df = pd.DataFrame(map_rows)
         st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
+
+        with st.expander("\U0001F30D 전체 20개 스팟 지도 보기"):
+            full_map_rows = []
+            for name, (lat, lon) in coords_map.items():
+                is_best = (name == best_spot['스팟'])
+                full_map_rows.append({
+                    "lat": lat, "lon": lon,
+                    "color": "#FF3B30" if is_best else "#1E88E5",
+                    "size": 4000 if is_best else 900
+                })
+            st.map(pd.DataFrame(full_map_rows), latitude="lat", longitude="lon", color="color", size="size")
 
 # --- 메인 앱 로직 ---
 def main():
