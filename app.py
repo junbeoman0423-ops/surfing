@@ -224,21 +224,18 @@ COLOR_OTHER = [30, 136, 229, 190]    # 파랑 - 그 외 스팟
 def build_map_df(coords_map, highlight_map, region_filter=None):
     """
     highlight_map: {스팟명: 'best' | 'lower' | 'upper'}
-    region_filter가 주어지면 해당 지역 스팟 + 하이라이트된 스팟만 포함한다
-    (다른 지역이라도 ±1단계 추천 스팟은 지도에서 빠지지 않도록 예외 처리).
+    region_filter가 주어지면 해당 지역 스팟만 포함한다 (그 지역만 확대해서 보여주기 위함).
     """
     rows = []
     for name, (lat, lon) in coords_map.items():
-        is_highlighted = name in highlight_map
-        in_region = (region_filter is None) or (REGION_OF.get(name) == region_filter)
-        if not in_region and not is_highlighted:
+        if region_filter is not None and REGION_OF.get(name) != region_filter:
             continue
 
         kind = highlight_map.get(name)
         if kind == "best":
-            color, radius = COLOR_BEST, 260
+            color, radius = COLOR_BEST, 420
         elif kind in ("lower", "upper"):
-            color, radius = COLOR_ADJACENT, 210
+            color, radius = COLOR_ADJACENT, 220
         else:
             color, radius = COLOR_OTHER, 140
 
@@ -520,10 +517,6 @@ def render_results():
 
         region_map_df = build_map_df(coords_map, highlight_map, region_filter=best_region)
         render_pydeck_map(region_map_df, zoom=8.6)
-
-        with st.expander("\U0001F30D 전체 20개 스팟 지도 보기"):
-            full_map_df = build_map_df(coords_map, highlight_map, region_filter=None)
-            render_pydeck_map(full_map_df, zoom=6.0)
 
 # --- 메인 앱 로직 ---
 def main():
