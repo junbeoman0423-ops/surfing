@@ -394,6 +394,9 @@ def render_results():
     lower_level, upper_level = user_level_num - 1, user_level_num + 1
     adj_col1, adj_col2 = st.columns(2)
 
+    # ±1단계 추천 스팟 이름을 저장 (지도에서 초록색으로 표시하기 위함)
+    adjacent_spot_names = set()
+
     with adj_col1:
         st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
         if lower_level < 1:
@@ -405,6 +408,7 @@ def render_results():
             else:
                 st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
                 st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
+                adjacent_spot_names.add(pick['스팟'])
 
     with adj_col2:
         st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
@@ -417,6 +421,7 @@ def render_results():
             else:
                 st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
                 st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
+                adjacent_spot_names.add(pick['스팟'])
 
     with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
         bc1, bc2, bc3, bc4, bc5 = st.columns(5)
@@ -442,7 +447,14 @@ def render_results():
 
     with col_map:
         best_region = REGION_OF.get(best_spot['스팟'], None)
-        st.markdown(f"### \u200B{best_region or ''} 지역 확대 (\U0001F534 = 오늘의 추천 스팟)")
+        st.markdown(f"### \u200B{best_region or ''} 지역 확대 (\U0001F534 = 오늘의 추천 스팟, \U0001F7E2 = ±1단계 추천 스팟)")
+
+        def spot_color(name, is_best):
+            if is_best:
+                return "#FF3B30"       # 오늘의 추천 스팟: 빨강
+            if name in adjacent_spot_names:
+                return "#2ECC71"       # ±1단계 추천 스팟: 초록
+            return "#1E88E5"           # 나머지: 파랑
 
         map_rows = []
         for name, (lat, lon) in coords_map.items():
@@ -452,8 +464,8 @@ def render_results():
             is_best = (name == best_spot['스팟'])
             map_rows.append({
                 "lat": lat, "lon": lon,
-                "color": "#FF3B30" if is_best else "#1E88E5",
-                "size": 3500 if is_best else 700
+                "color": spot_color(name, is_best),
+                "size": 3500 if is_best else (2200 if name in adjacent_spot_names else 700)
             })
         map_df = pd.DataFrame(map_rows)
         st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
@@ -464,8 +476,8 @@ def render_results():
                 is_best = (name == best_spot['스팟'])
                 full_map_rows.append({
                     "lat": lat, "lon": lon,
-                    "color": "#FF3B30" if is_best else "#1E88E5",
-                    "size": 4000 if is_best else 900
+                    "color": spot_color(name, is_best),
+                    "size": 4000 if is_best else (2500 if name in adjacent_spot_names else 900)
                 })
             st.map(pd.DataFrame(full_map_rows), latitude="lat", longitude="lon", color="color", size="size")
 
