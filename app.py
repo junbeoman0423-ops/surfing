@@ -5,21 +5,17 @@ import time
 
 # =====================================================================
 # Ocean ICT Festival 출품작 - 서핑 환경 예측 및 추천 시스템 (웹 대시보드)
-# SurfScience.com의 '파고(ft) x 파도 형태(Pitching/Rolling)' 2축 모델 적용
-# 종합 점수는 변수별 기여 점수로 세분화 + 지형 기반 난이도 등급
-# + 사용자 실력(별점) 기반 맞춤 추천 + 실력 ±1단계 추천 + 지도 강조
+# 화면 전환(홈 -> 결과) + 큰 타이틀 + 반짝이는 제작자 크레딧
 # =====================================================================
 
-# --- 데이터 수집 함수 (안정성 강화: 타임아웃 확대 + 재시도 로직) ---
+# --- 데이터 수집 함수 ---
 @st.cache_data(ttl=600)
 def fetch_weather_and_marine(lat, lon, retries=2):
-    '''Open-Meteo API에서 기상/해양/조위 데이터를 실시간으로 가져옵니다. 실패 시 재시도합니다.'''
     for attempt in range(retries + 1):
         try:
             weather_url = "https://api.open-meteo.com/v1/forecast"
             weather_params = {
-                "latitude": lat,
-                "longitude": lon,
+                "latitude": lat, "longitude": lon,
                 "current": "temperature_2m,wind_speed_10m,wind_direction_10m",
                 "timezone": "Asia/Seoul"
             }
@@ -27,8 +23,7 @@ def fetch_weather_and_marine(lat, lon, retries=2):
 
             marine_url = "https://marine-api.open-meteo.com/v1/marine"
             marine_params = {
-                "latitude": lat,
-                "longitude": lon,
+                "latitude": lat, "longitude": lon,
                 "current": "wave_height,wave_period,sea_level_height_msl",
                 "timezone": "Asia/Seoul"
             }
@@ -36,11 +31,11 @@ def fetch_weather_and_marine(lat, lon, retries=2):
 
             return {
                 "temp": w_res['current']['temperature_2m'],
-                "wind_speed": w_res['current']['wind_speed_10m'],          # km/h
-                "wind_direction": w_res['current']['wind_direction_10m'],  # 도(°)
-                "wave_height": m_res['current'].get('wave_height', 0.5),   # m
-                "wave_period": m_res['current'].get('wave_period', 5.0),   # 초
-                "tide_level": m_res['current'].get('sea_level_height_msl', None)  # m (없을 수 있음)
+                "wind_speed": w_res['current']['wind_speed_10m'],
+                "wind_direction": w_res['current']['wind_direction_10m'],
+                "wave_height": m_res['current'].get('wave_height', 0.5),
+                "wave_period": m_res['current'].get('wave_period', 5.0),
+                "tide_level": m_res['current'].get('sea_level_height_msl', None)
             }
         except Exception:
             if attempt < retries:
@@ -49,14 +44,8 @@ def fetch_weather_and_marine(lat, lon, retries=2):
             return {"temp": 20, "wind_speed": 3, "wind_direction": 0,
                      "wave_height": 1, "wave_period": 6, "tide_level": None}
 
-# --- 파도 형태 지수 계산 (Pitching vs Rolling) ---
 def calculate_wave_shape_score(wave_period, wind_speed_kph, wind_direction, beach_angle, tide_level_m=None):
-    '''
-    양수(+) -> Pitching (가파르고 말리는 파도)
-    음수(-) -> Rolling (완만하고 부드러운 파도)
-    '''
     score = 0
-
     if wave_period >= 12:
         score += 50
     elif wave_period >= 8:
@@ -80,40 +69,31 @@ def calculate_wave_shape_score(wave_period, wind_speed_kph, wind_direction, beac
             score -= 20
 
     final_score = max(-100, min(100, round(score, 1)))
-
     if final_score >= 40:
         shape_type = "Pitching (가파름)"
     elif final_score <= -40:
         shape_type = "Rolling (완만함)"
     else:
         shape_type = "Spilling/Neutral (일반적)"
-
     return final_score, shape_type
 
-# --- 종합 점수 (변수별 기여 점수로 세분화, 총 100점 만점) ---
 def calculate_score(data, shape_score):
     wh, wp, temp, wind = data['wave_height'], data['wave_period'], data['temp'], data['wind_speed']
-
     height_score = max(0, 30 - abs(wh - 1.2) * 15)
     period_score = max(0, min(25, wp * 2.5))
     temp_score = max(0, 20 - abs(temp - 22) * 1.2)
     wind_score = max(0, 15 - min(15, wind * 0.5))
     shape_bonus = max(0, 10 - abs(shape_score - 20) * 0.1)
-
     breakdown = {
-        "파고 점수": round(height_score, 1),
-        "주기 점수": round(period_score, 1),
-        "기온 점수": round(temp_score, 1),
-        "바람 점수": round(wind_score, 1),
+        "파고 점수": round(height_score, 1), "주기 점수": round(period_score, 1),
+        "기온 점수": round(temp_score, 1), "바람 점수": round(wind_score, 1),
         "형태 점수": round(shape_bonus, 1),
     }
     total = round(sum(breakdown.values()), 1)
     return total, breakdown
 
-# --- 서핑 난이도 계산 (해저 지형 + 실시간 해양 데이터 기반) ---
 def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shape_score, has_rip_current=False):
     score = 0
-
     if bottom_type == 'reef':
         score += 35
     elif bottom_type == 'pebble':
@@ -141,7 +121,6 @@ def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shap
         score += 15
 
     final_score = max(0, min(100, score))
-
     if final_score < 25:
         level_num, level, target = 1, "Level 1 (초급)", "입문자 & 롱보더 (안전하고 완만함)"
     elif final_score < 45:
@@ -152,10 +131,8 @@ def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shap
         level_num, level, target = 4, "Level 4 (중상급)", "상급자 (강한 파워와 속도 제어 필요)"
     else:
         level_num, level, target = 5, "Level 5 (최상급)", "전문 서퍼 전용 (부상 위험 높음)"
-
     return final_score, level, target, level_num
 
-# --- SurfScience 차트 기반 보드 좌표 (파고 ft, 형태 점수 -100~100) ---
 BOARD_CHART = [
     ("에어리얼 보드 (Aerial Board)", 2.0, 75, "작고 강하게 부서지는 파도에서 공중 트릭에 최적화된 숙련자용 보드"),
     ("토우 보드 (Tow Board)", 11.0, 75, "초대형 파도를 제트스키로 견인해서 타는 전문가 전용 보드"),
@@ -187,10 +164,8 @@ def get_recommendations(data, beach_angle):
         beach_angle, data.get('tide_level')
     )
     board, board_desc = get_board_from_chart(height_ft, shape_score)
-
     temp = data['temp']
     gear = "래쉬가드/스프링슈트" if temp >= 24 else "3/2mm 풀슈트" if temp >= 18 else "겨울용 풀슈트/부츠"
-
     return board, board_desc, gear, height_ft, shape_score, shape_type
 
 def apply_skill_board_override(board, board_desc, user_level_num, diff_level_num):
@@ -199,14 +174,36 @@ def apply_skill_board_override(board, board_desc, user_level_num, diff_level_num
     return board, board_desc
 
 def pick_best_for_level(df, level_num):
-    '''주어진 난이도 숫자(level_num)에 해당하는 스팟 중 종합 점수가 가장 높은 스팟을 반환. 없으면 None.'''
     subset = df[df["난이도 숫자"] == level_num]
     if subset.empty:
         return None
     return subset.sort_values(by="종합 점수", ascending=False).iloc[0]
 
-# --- 바다 느낌 배경 CSS ---
-def apply_ocean_background():
+SPOTS = {
+    "양양 (죽도해수욕장)":       {"lat": 38.011, "lon": 128.761, "angle": 70,  "bottom": "sand",   "rip": False},
+    "양양 (기사문해변)":         {"lat": 38.030, "lon": 128.665, "angle": 75,  "bottom": "sand",   "rip": False},
+    "양양 (인구해변)":           {"lat": 38.046, "lon": 128.658, "angle": 75,  "bottom": "sand",   "rip": False},
+    "강릉 (금진해변)":           {"lat": 37.639, "lon": 129.196, "angle": 80,  "bottom": "sand",   "rip": False},
+    "강릉 (경포해변)":           {"lat": 37.805, "lon": 128.908, "angle": 75,  "bottom": "sand",   "rip": False},
+    "태안 (만리포해수욕장)":     {"lat": 36.782, "lon": 126.138, "angle": 260, "bottom": "sand",   "rip": False},
+    "부산 (송정해수욕장)":       {"lat": 35.178, "lon": 129.199, "angle": 140, "bottom": "sand",   "rip": False},
+    "부산 (다대포해수욕장)":     {"lat": 35.049, "lon": 128.966, "angle": 190, "bottom": "sand",   "rip": True},
+    "제주 (중문해수욕장)":       {"lat": 33.244, "lon": 126.412, "angle": 180, "bottom": "reef",   "rip": False},
+    "제주 (월정리해변)":         {"lat": 33.556, "lon": 126.796, "angle": 10,  "bottom": "sand",   "rip": False},
+    "제주 (이호테우해변)":       {"lat": 33.499, "lon": 126.463, "angle": 340, "bottom": "sand",   "rip": False},
+    "제주 (삼양검은모래해변)":   {"lat": 33.520, "lon": 126.586, "angle": 5,   "bottom": "sand",   "rip": False},
+    "제주 (사계해변)":           {"lat": 33.225, "lon": 126.307, "angle": 190, "bottom": "reef",   "rip": False},
+    "제주 (함덕해수욕장)":       {"lat": 33.543, "lon": 126.670, "angle": 15,  "bottom": "sand",   "rip": False},
+    "제주 (곽지해수욕장)":       {"lat": 33.450, "lon": 126.310, "angle": 320, "bottom": "sand",   "rip": False},
+    "고성 (봉수대해수욕장)":     {"lat": 38.350, "lon": 128.470, "angle": 85,  "bottom": "sand",   "rip": False},
+    "포항 (신항만)":             {"lat": 36.070, "lon": 129.390, "angle": 95,  "bottom": "reef",   "rip": False},
+    "경주 (남열해돋이해수욕장)": {"lat": 35.767, "lon": 129.487, "angle": 95,  "bottom": "pebble", "rip": False},
+    "삼척 (용화해변)":           {"lat": 37.219, "lon": 129.313, "angle": 85,  "bottom": "sand",   "rip": False},
+    "삼척 (맹방해변)":           {"lat": 37.315, "lon": 129.198, "angle": 85,  "bottom": "sand",   "rip": False},
+}
+
+# --- 스타일 (바다 배경, 큰 타이틀, 반짝이는 크레딧) ---
+def apply_styles():
     st.markdown(
         """
         <style>
@@ -214,30 +211,113 @@ def apply_ocean_background():
             background: linear-gradient(180deg, #E3F6FD 0%, #A6E1FA 25%, #4FC3E8 55%, #0E7FB0 80%, #075E85 100%);
             background-attachment: fixed;
         }
-        [data-testid="stHeader"] {
-            background: rgba(255, 255, 255, 0);
-        }
+        [data-testid="stHeader"] { background: rgba(255, 255, 255, 0); }
         .block-container {
-            background: rgba(255, 255, 255, 0.78);
+            background: rgba(255, 255, 255, 0.80);
             border-radius: 18px;
             padding: 2rem 2.5rem;
             margin-top: 1rem;
+        }
+        .surf-main-title {
+            text-align: center;
+            font-size: 4.2rem;
+            font-weight: 900;
+            margin-bottom: 0;
+            background: linear-gradient(90deg, #0077B6, #00B4D8, #48CAE4, #0077B6);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: wave-shine 4s linear infinite;
+        }
+        @keyframes wave-shine {
+            to { background-position: 200% center; }
+        }
+        .surf-sub-title {
+            text-align: center;
+            font-size: 1.1rem;
+            color: #333;
+            margin-top: 0.2rem;
+            margin-bottom: 1.5rem;
+        }
+        .sparkle-credit {
+            text-align: center;
+            font-size: 1.05rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #ffffff, #FFD166, #ffffff, #90E0EF, #ffffff);
+            background-size: 250% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: sparkle-move 2.5s linear infinite;
+            padding: 0.8rem 0 0.3rem 0;
+        }
+        @keyframes sparkle-move {
+            to { background-position: 250% center; }
         }
         </style>
         """,
         unsafe_allow_html=True
     )
 
-# --- 메인 앱 로직 ---
-def main():
-    st.set_page_config(page_title="서핑 가자~~~!", page_icon="\U0001F3C4", layout="wide")
-    apply_ocean_background()
+def render_title():
+    st.markdown('<div class="surf-main-title">🏄 서핑 가자~! 🌊</div>', unsafe_allow_html=True)
+    st.markdown('<div class="surf-sub-title">해양 기상 기반 서핑 환경 예측 시스템 · Ocean ICT Festival 출품작</div>', unsafe_allow_html=True)
 
-    st.title("\U0001F30A 해양 기상 기반 서핑 환경 예측 시스템")
-    st.markdown("Ocean ICT Festival 프로젝트 출품작 | 실력 맞춤형 스팟 & 보드 추천")
+def render_credit():
+    st.markdown(
+        '<div class="sparkle-credit">✨ 제작자: 마현우 · 안준범 · 이상윤 · 한지호 ✨</div>',
+        unsafe_allow_html=True
+    )
+
+# --- 데이터 분석 실행 ---
+def run_analysis(user_level_num):
+    progress_bar = st.progress(0, text="데이터를 불러오는 중입니다...")
+    results = []
+    coords_map = {}
+    total = len(SPOTS)
+
+    for i, (name, coords) in enumerate(SPOTS.items()):
+        data = fetch_weather_and_marine(coords['lat'], coords['lon'])
+        board, board_desc, gear, height_ft, shape_score, shape_type = get_recommendations(data, coords['angle'])
+        score_total, score_breakdown = calculate_score(data, shape_score)
+        diff_score, diff_level, diff_target, diff_level_num = calculate_spot_difficulty(
+            coords['bottom'], data['wave_height'], data['wave_period'], shape_score, coords['rip']
+        )
+        board, board_desc = apply_skill_board_override(board, board_desc, user_level_num, diff_level_num)
+
+        if diff_level_num == user_level_num:
+            fit = "\u2705 딱 맞음"
+        elif diff_level_num > user_level_num:
+            fit = f"\u26A0\uFE0F 도전적 (+{diff_level_num - user_level_num})"
+        else:
+            fit = f"\U0001F343 여유로움 (-{user_level_num - diff_level_num})"
+
+        results.append({
+            "스팟": name, "종합 점수": score_total,
+            "파고점수": score_breakdown["파고 점수"], "주기점수": score_breakdown["주기 점수"],
+            "기온점수": score_breakdown["기온 점수"], "바람점수": score_breakdown["바람 점수"],
+            "형태점수": score_breakdown["형태 점수"],
+            "파고 (ft)": round(height_ft, 1), "파도 주기 (초)": data['wave_period'],
+            "파도 형태": shape_type, "기온 (°C)": data['temp'],
+            "추천 보드": board, "보드 설명": board_desc, "추천 준비물": gear,
+            "난이도 점수": diff_score, "난이도 등급": diff_level, "난이도 숫자": diff_level_num,
+            "권장 대상": diff_target, "내 실력 적합도": fit,
+        })
+        coords_map[name] = (coords['lat'], coords['lon'])
+        progress_bar.progress((i + 1) / total, text=f"{name} 데이터 분석 완료 ({i+1}/{total})")
+        time.sleep(0.1)
+
+    progress_bar.empty()
+    df = pd.DataFrame(results).sort_values(by="종합 점수", ascending=False).reset_index(drop=True)
+    return df, coords_map
+
+# --- 화면 1: 홈 (실력 선택) ---
+def render_home():
+    render_title()
+    render_credit()
     st.divider()
 
-    # --- 사용자 실력 선택 (별 5개) ---
     st.markdown("#### \u2B50 먼저, 당신의 서핑 실력을 선택해주세요")
     level_labels = {0: "Level 1 - 입문자 (파도를 처음 타봐요)",
                      1: "Level 2 - 초중급 (테이크오프는 가능해요)",
@@ -250,174 +330,128 @@ def main():
                + ("" if star_value is not None else " (기본값 · 별을 눌러 선택하세요)"))
     st.divider()
 
-    # 대표 서핑/해수욕장 20곳: 위도, 경도, 해변 방위각(°), 해저 지형, 이안류 여부
-    spots = {
-        "양양 (죽도해수욕장)":       {"lat": 38.011, "lon": 128.761, "angle": 70,  "bottom": "sand",   "rip": False},
-        "양양 (기사문해변)":         {"lat": 38.030, "lon": 128.665, "angle": 75,  "bottom": "sand",   "rip": False},
-        "양양 (인구해변)":           {"lat": 38.046, "lon": 128.658, "angle": 75,  "bottom": "sand",   "rip": False},
-        "강릉 (금진해변)":           {"lat": 37.639, "lon": 129.196, "angle": 80,  "bottom": "sand",   "rip": False},
-        "강릉 (경포해변)":           {"lat": 37.805, "lon": 128.908, "angle": 75,  "bottom": "sand",   "rip": False},
-        "태안 (만리포해수욕장)":     {"lat": 36.782, "lon": 126.138, "angle": 260, "bottom": "sand",   "rip": False},
-        "부산 (송정해수욕장)":       {"lat": 35.178, "lon": 129.199, "angle": 140, "bottom": "sand",   "rip": False},
-        "부산 (다대포해수욕장)":     {"lat": 35.049, "lon": 128.966, "angle": 190, "bottom": "sand",   "rip": True},
-        "제주 (중문해수욕장)":       {"lat": 33.244, "lon": 126.412, "angle": 180, "bottom": "reef",   "rip": False},
-        "제주 (월정리해변)":         {"lat": 33.556, "lon": 126.796, "angle": 10,  "bottom": "sand",   "rip": False},
-        "제주 (이호테우해변)":       {"lat": 33.499, "lon": 126.463, "angle": 340, "bottom": "sand",   "rip": False},
-        "제주 (삼양검은모래해변)":   {"lat": 33.520, "lon": 126.586, "angle": 5,   "bottom": "sand",   "rip": False},
-        "제주 (사계해변)":           {"lat": 33.225, "lon": 126.307, "angle": 190, "bottom": "reef",   "rip": False},
-        "제주 (함덕해수욕장)":       {"lat": 33.543, "lon": 126.670, "angle": 15,  "bottom": "sand",   "rip": False},
-        "제주 (곽지해수욕장)":       {"lat": 33.450, "lon": 126.310, "angle": 320, "bottom": "sand",   "rip": False},
-        "고성 (봉수대해수욕장)":     {"lat": 38.350, "lon": 128.470, "angle": 85,  "bottom": "sand",   "rip": False},
-        "포항 (신항만)":             {"lat": 36.070, "lon": 129.390, "angle": 95,  "bottom": "reef",   "rip": False},
-        "경주 (남열해돋이해수욕장)": {"lat": 35.767, "lon": 129.487, "angle": 95,  "bottom": "pebble", "rip": False},
-        "삼척 (용화해변)":           {"lat": 37.219, "lon": 129.313, "angle": 85,  "bottom": "sand",   "rip": False},
-        "삼척 (맹방해변)":           {"lat": 37.315, "lon": 129.198, "angle": 85,  "bottom": "sand",   "rip": False},
-    }
+    st.caption("⚠️ 해저 지형과 이안류 정보는 참고용 정적 데이터입니다. 실제 방문 전 현지 안전 정보를 반드시 확인하세요.")
 
-    st.caption("⚠️ 해저 지형(bottom)과 이안류(rip) 정보는 참고용 정적 데이터입니다. 실제 방문 전 현지 안전 정보를 반드시 확인하세요.")
+    if st.button("\U0001F30A 실시간 서핑 환경 데이터 분석 시작", type="primary", use_container_width=True):
+        with st.spinner("바다로 나갈 준비를 하는 중... \U0001F30A"):
+            df, coords_map = run_analysis(user_level_num)
+        st.session_state.df = df
+        st.session_state.coords_map = coords_map
+        st.session_state.user_level_num = user_level_num
+        st.session_state.page = "results"
+        st.rerun()
 
-    if st.button("\U0001F30A 실시간 서핑 환경 데이터 분석 시작", type="primary"):
-        progress_bar = st.progress(0, text="데이터를 불러오는 중입니다...")
-        results = []
-        coords_map = {}
-        total = len(spots)
+# --- 화면 2: 결과 ---
+def render_results():
+    render_title()
+    render_credit()
 
-        for i, (name, coords) in enumerate(spots.items()):
-            data = fetch_weather_and_marine(coords['lat'], coords['lon'])
-            board, board_desc, gear, height_ft, shape_score, shape_type = get_recommendations(data, coords['angle'])
-            score_total, score_breakdown = calculate_score(data, shape_score)
-            diff_score, diff_level, diff_target, diff_level_num = calculate_spot_difficulty(
-                coords['bottom'], data['wave_height'], data['wave_period'], shape_score, coords['rip']
-            )
-            board, board_desc = apply_skill_board_override(board, board_desc, user_level_num, diff_level_num)
+    if st.button("\u2190 다시 선택하기"):
+        st.session_state.page = "home"
+        st.rerun()
 
-            if diff_level_num == user_level_num:
-                fit = "\u2705 딱 맞음"
-            elif diff_level_num > user_level_num:
-                fit = f"\u26A0\uFE0F 도전적 (+{diff_level_num - user_level_num})"
+    st.divider()
+
+    df = st.session_state.df
+    coords_map = st.session_state.coords_map
+    user_level_num = st.session_state.user_level_num
+
+    matched_df = df[df["난이도 숫자"] == user_level_num]
+    if matched_df.empty:
+        df["_diff_gap"] = (df["난이도 숫자"] - user_level_num).abs()
+        min_gap = df["_diff_gap"].min()
+        matched_df = df[df["_diff_gap"] == min_gap]
+    best_spot = matched_df.sort_values(by="종합 점수", ascending=False).iloc[0]
+
+    st.success("데이터 분석 완료!")
+    st.subheader(f"\U0001F3C6 [Level {user_level_num}] 당신에게 딱 맞는 서핑 스팟: **{best_spot['스팟']}** ({best_spot['종합 점수']}점)")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("\U0001F30A 파고", f"{best_spot['파고 (ft)']} ft")
+    col2.metric("\u23F1\uFE0F 파도 주기", f"{best_spot['파도 주기 (초)']} 초")
+    col3.metric("\U0001F30A 파도 형태", best_spot['파도 형태'])
+    col4.metric("\U0001F3C4 추천 보드", best_spot['추천 보드'])
+    col5.metric("\u26A0\uFE0F 난이도", best_spot['난이도 등급'])
+
+    st.info(f"\U0001F4A1 **보드 선정 이유:** {best_spot['보드 설명']}")
+    st.info(f"\U0001F457 **필수 준비물:** {best_spot['추천 준비물']}")
+    st.warning(f"\U0001F3C3 **권장 대상:** {best_spot['권장 대상']} (난이도 점수 {best_spot['난이도 점수']}/100, 내 실력 적합도: {best_spot['내 실력 적합도']})")
+
+    st.markdown("### \U0001F504 내 실력 ±1단계 추천 스팟")
+    lower_level, upper_level = user_level_num - 1, user_level_num + 1
+    adj_col1, adj_col2 = st.columns(2)
+
+    with adj_col1:
+        st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
+        if lower_level < 1:
+            st.caption("이미 가장 쉬운 Level 1을 선택하셨습니다.")
+        else:
+            pick = pick_best_for_level(df, lower_level)
+            if pick is None:
+                st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
             else:
-                fit = f"\U0001F343 여유로움 (-{user_level_num - diff_level_num})"
+                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
 
-            results.append({
-                "스팟": name,
-                "종합 점수": score_total,
-                "파고점수": score_breakdown["파고 점수"],
-                "주기점수": score_breakdown["주기 점수"],
-                "기온점수": score_breakdown["기온 점수"],
-                "바람점수": score_breakdown["바람 점수"],
-                "형태점수": score_breakdown["형태 점수"],
-                "파고 (ft)": round(height_ft, 1),
-                "파도 주기 (초)": data['wave_period'],
-                "파도 형태": shape_type,
-                "기온 (°C)": data['temp'],
-                "추천 보드": board,
-                "보드 설명": board_desc,
-                "추천 준비물": gear,
-                "난이도 점수": diff_score,
-                "난이도 등급": diff_level,
-                "난이도 숫자": diff_level_num,
-                "권장 대상": diff_target,
-                "내 실력 적합도": fit,
+    with adj_col2:
+        st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
+        if upper_level > 5:
+            st.caption("이미 가장 어려운 Level 5를 선택하셨습니다.")
+        else:
+            pick = pick_best_for_level(df, upper_level)
+            if pick is None:
+                st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
+            else:
+                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
+
+    with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
+        bc1, bc2, bc3, bc4, bc5 = st.columns(5)
+        bc1.metric("파고 기여", f"{best_spot['파고점수']} / 30")
+        bc2.metric("주기 기여", f"{best_spot['주기점수']} / 25")
+        bc3.metric("기온 기여", f"{best_spot['기온점수']} / 20")
+        bc4.metric("바람 기여", f"{best_spot['바람점수']} / 15")
+        bc5.metric("형태 기여", f"{best_spot['형태점수']} / 10")
+        breakdown_df = pd.DataFrame({
+            "항목": ["파고", "주기", "기온", "바람", "파도형태"],
+            "점수": [best_spot['파고점수'], best_spot['주기점수'], best_spot['기온점수'],
+                    best_spot['바람점수'], best_spot['형태점수']]
+        }).set_index("항목")
+        st.bar_chart(breakdown_df)
+
+    st.divider()
+
+    col_table, col_map = st.columns([2, 1])
+    with col_table:
+        st.markdown(f"### \u200B지역별 상세 분석 결과 (Level {user_level_num} 기준 적합도 포함)")
+        display_df = df.drop(columns=["_diff_gap"], errors="ignore")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    with col_map:
+        st.markdown("### \u200B서핑 스팟 위치 (\U0001F534 = 오늘의 추천 스팟)")
+        map_rows = []
+        for name, (lat, lon) in coords_map.items():
+            is_best = (name == best_spot['스팟'])
+            map_rows.append({
+                "lat": lat, "lon": lon,
+                "color": "#FF3B30" if is_best else "#1E88E5",
+                "size": 4000 if is_best else 900
             })
-            coords_map[name] = (coords['lat'], coords['lon'])
+        map_df = pd.DataFrame(map_rows)
+        st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
 
-            progress_bar.progress((i + 1) / total, text=f"{name} 데이터 분석 완료 ({i+1}/{total})")
-            time.sleep(0.15)
+# --- 메인 앱 로직 ---
+def main():
+    st.set_page_config(page_title="서핑 가자~!", page_icon="\U0001F3C4", layout="wide")
+    apply_styles()
 
-        progress_bar.empty()
+    if "page" not in st.session_state:
+        st.session_state.page = "home"
 
-        df = pd.DataFrame(results).sort_values(by="종합 점수", ascending=False).reset_index(drop=True)
-
-        # --- 사용자 실력에 맞는 스팟 우선 추천 ---
-        matched_df = df[df["난이도 숫자"] == user_level_num]
-        if matched_df.empty:
-            df["_diff_gap"] = (df["난이도 숫자"] - user_level_num).abs()
-            min_gap = df["_diff_gap"].min()
-            matched_df = df[df["_diff_gap"] == min_gap]
-        best_spot = matched_df.sort_values(by="종합 점수", ascending=False).iloc[0]
-
-        st.success("데이터 분석 완료!")
-
-        st.subheader(f"\U0001F3C6 [Level {user_level_num}] 당신에게 딱 맞는 서핑 스팟: **{best_spot['스팟']}** ({best_spot['종합 점수']}점)")
-
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("\U0001F30A 파고", f"{best_spot['파고 (ft)']} ft")
-        col2.metric("\u23F1\uFE0F 파도 주기", f"{best_spot['파도 주기 (초)']} 초")
-        col3.metric("\U0001F30A 파도 형태", best_spot['파도 형태'])
-        col4.metric("\U0001F3C4 추천 보드", best_spot['추천 보드'])
-        col5.metric("\u26A0\uFE0F 난이도", best_spot['난이도 등급'])
-
-        st.info(f"\U0001F4A1 **보드 선정 이유:** {best_spot['보드 설명']}")
-        st.info(f"\U0001F457 **필수 준비물:** {best_spot['추천 준비물']}")
-        st.warning(f"\U0001F3C3 **권장 대상:** {best_spot['권장 대상']} (난이도 점수 {best_spot['난이도 점수']}/100, 내 실력 적합도: {best_spot['내 실력 적합도']})")
-
-        # --- 실력 ±1단계 추천 ---
-        st.markdown("### \U0001F504 내 실력 ±1단계 추천 스팟")
-        lower_level = user_level_num - 1
-        upper_level = user_level_num + 1
-        adj_col1, adj_col2 = st.columns(2)
-
-        with adj_col1:
-            st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
-            if lower_level < 1:
-                st.caption("이미 가장 쉬운 Level 1을 선택하셨습니다.")
-            else:
-                pick = pick_best_for_level(df, lower_level)
-                if pick is None:
-                    st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
-                else:
-                    st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
-                    st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
-
-        with adj_col2:
-            st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
-            if upper_level > 5:
-                st.caption("이미 가장 어려운 Level 5를 선택하셨습니다.")
-            else:
-                pick = pick_best_for_level(df, upper_level)
-                if pick is None:
-                    st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
-                else:
-                    st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
-                    st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
-
-        # --- 종합 점수 상세 내역 ---
-        with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
-            bc1, bc2, bc3, bc4, bc5 = st.columns(5)
-            bc1.metric("파고 기여", f"{best_spot['파고점수']} / 30")
-            bc2.metric("주기 기여", f"{best_spot['주기점수']} / 25")
-            bc3.metric("기온 기여", f"{best_spot['기온점수']} / 20")
-            bc4.metric("바람 기여", f"{best_spot['바람점수']} / 15")
-            bc5.metric("형태 기여", f"{best_spot['형태점수']} / 10")
-            breakdown_df = pd.DataFrame({
-                "항목": ["파고", "주기", "기온", "바람", "파도형태"],
-                "점수": [best_spot['파고점수'], best_spot['주기점수'], best_spot['기온점수'],
-                        best_spot['바람점수'], best_spot['형태점수']]
-            }).set_index("항목")
-            st.bar_chart(breakdown_df)
-
-        st.divider()
-
-        col_table, col_map = st.columns([2, 1])
-
-        with col_table:
-            st.markdown(f"### \u200B지역별 상세 분석 결과 (Level {user_level_num} 기준 적합도 포함)")
-            display_df = df.drop(columns=["_diff_gap"], errors="ignore")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-        with col_map:
-            st.markdown("### \u200B서핑 스팟 위치 (\U0001F534 = 오늘의 추천 스팟)")
-            map_rows = []
-            for name, (lat, lon) in coords_map.items():
-                is_best = (name == best_spot['스팟'])
-                map_rows.append({
-                    "lat": lat,
-                    "lon": lon,
-                    "color": "#FF3B30" if is_best else "#1E88E5",
-                    "size": 4000 if is_best else 900
-                })
-            map_df = pd.DataFrame(map_rows)
-            st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
+    if st.session_state.page == "home":
+        render_home()
+    else:
+        render_results()
 
 if __name__ == '__main__':
     main()
