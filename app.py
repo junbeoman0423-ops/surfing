@@ -189,6 +189,7 @@ SPOTS = {
     "태안 (만리포해수욕장)":     {"lat": 36.782, "lon": 126.138, "angle": 260, "bottom": "sand",   "rip": False},
     "부산 (송정해수욕장)":       {"lat": 35.178, "lon": 129.199, "angle": 140, "bottom": "sand",   "rip": False},
     "부산 (다대포해수욕장)":     {"lat": 35.049, "lon": 128.966, "angle": 190, "bottom": "sand",   "rip": True},
+    "부산 (임랑해수욕장)":       {"lat": 35.360, "lon": 129.239, "angle": 100, "bottom": "sand",   "rip": False},
     "제주 (중문해수욕장)":       {"lat": 33.244, "lon": 126.412, "angle": 180, "bottom": "reef",   "rip": False},
     "제주 (월정리해변)":         {"lat": 33.556, "lon": 126.796, "angle": 10,  "bottom": "sand",   "rip": False},
     "제주 (이호테우해변)":       {"lat": 33.499, "lon": 126.463, "angle": 340, "bottom": "sand",   "rip": False},
@@ -197,24 +198,31 @@ SPOTS = {
     "제주 (함덕해수욕장)":       {"lat": 33.543, "lon": 126.670, "angle": 15,  "bottom": "sand",   "rip": False},
     "제주 (곽지해수욕장)":       {"lat": 33.450, "lon": 126.310, "angle": 320, "bottom": "sand",   "rip": False},
     "고성 (봉수대해수욕장)":     {"lat": 38.350, "lon": 128.470, "angle": 85,  "bottom": "sand",   "rip": False},
+    "속초 (속초해수욕장)":       {"lat": 38.207, "lon": 128.594, "angle": 80,  "bottom": "sand",   "rip": False},
     "포항 (신항만)":             {"lat": 36.070, "lon": 129.390, "angle": 95,  "bottom": "reef",   "rip": False},
     "경주 (남열해돋이해수욕장)": {"lat": 35.767, "lon": 129.487, "angle": 95,  "bottom": "pebble", "rip": False},
     "삼척 (용화해변)":           {"lat": 37.219, "lon": 129.313, "angle": 85,  "bottom": "sand",   "rip": False},
     "삼척 (맹방해변)":           {"lat": 37.315, "lon": 129.198, "angle": 85,  "bottom": "sand",   "rip": False},
+    "남해 (상주은모래비치)":     {"lat": 34.812, "lon": 127.926, "angle": 190, "bottom": "sand",   "rip": False},
+    "여수 (만성리해수욕장)":     {"lat": 34.766, "lon": 127.766, "angle": 200, "bottom": "sand",   "rip": False},
+    "거제 (학동몽돌해변)":       {"lat": 34.774, "lon": 128.638, "angle": 160, "bottom": "pebble", "rip": False},
 }
 
 # 스팟별 지역 그룹 (추천 스팟이 속한 지역만 지도에서 확대해서 보여주기 위함)
 REGION_OF = {
     "양양 (죽도해수욕장)": "강원", "양양 (기사문해변)": "강원", "양양 (인구해변)": "강원",
     "강릉 (금진해변)": "강원", "강릉 (경포해변)": "강원",
-    "고성 (봉수대해수욕장)": "강원", "삼척 (용화해변)": "강원", "삼척 (맹방해변)": "강원",
+    "고성 (봉수대해수욕장)": "강원", "속초 (속초해수욕장)": "강원",
+    "삼척 (용화해변)": "강원", "삼척 (맹방해변)": "강원",
     "태안 (만리포해수욕장)": "충남",
-    "부산 (송정해수욕장)": "부산", "부산 (다대포해수욕장)": "부산",
+    "부산 (송정해수욕장)": "부산", "부산 (다대포해수욕장)": "부산", "부산 (임랑해수욕장)": "부산",
     "제주 (중문해수욕장)": "제주", "제주 (월정리해변)": "제주", "제주 (이호테우해변)": "제주",
     "제주 (삼양검은모래해변)": "제주", "제주 (사계해변)": "제주",
     "제주 (함덕해수욕장)": "제주", "제주 (곽지해수욕장)": "제주",
     "포항 (신항만)": "경북", "경주 (남열해돋이해수욕장)": "경북",
+    "남해 (상주은모래비치)": "남해", "여수 (만성리해수욕장)": "남해", "거제 (학동몽돌해변)": "남해",
 }
+
 
 # --- 지도 색상 정의 ---
 COLOR_BEST = [255, 59, 48, 255]      # 빨강 - 오늘의 최적 추천
@@ -233,9 +241,9 @@ def build_map_df(coords_map, highlight_map, region_filter=None):
 
         kind = highlight_map.get(name)
         if kind == "best":
-            color, radius = COLOR_BEST, 420
+            color, radius = COLOR_BEST, 900
         elif kind in ("lower", "upper"):
-            color, radius = COLOR_ADJACENT, 220
+            color, radius = COLOR_ADJACENT, 260
         else:
             color, radius = COLOR_OTHER, 140
 
@@ -251,14 +259,16 @@ def render_pydeck_map(map_df, zoom):
     center_lon = map_df["lon"].mean()
 
     # radius_min_pixels/radius_max_pixels로 줌 레벨과 무관하게 항상 눈에 보이는 크기를 보장.
+    # 추천 스팟(반경 900)이 다른 스팟(140~260)보다 화면상으로도 뚜렷하게 커 보이도록
+    # radius_max_pixels를 넉넉히 잡음.
     scatter_layer = pdk.Layer(
         "ScatterplotLayer",
         data=map_df,
         get_position="[lon, lat]",
         get_fill_color="color",
         get_radius="radius",
-        radius_min_pixels=6,
-        radius_max_pixels=40,
+        radius_min_pixels=7,
+        radius_max_pixels=70,
         pickable=True,
         stroked=True,
         get_line_color=[255, 255, 255, 220],
