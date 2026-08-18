@@ -264,15 +264,23 @@ def render_pydeck_map(map_df, zoom):
         get_line_color=[255, 255, 255, 220],
         line_width_min_pixels=1,
     )
+    # 한글 라벨이 보이려면 character_set을 지정해야 함 (기본값은 영문/숫자만 렌더링).
+    # size_units="meters" + size_min_pixels=0 으로 두면 지도를 축소(줌아웃)할수록
+    # 글자가 실제 크기 기준으로 작아지다가 자연스럽게 사라짐.
     text_layer = pdk.Layer(
         "TextLayer",
         data=map_df,
         get_position="[lon, lat]",
         get_text="스팟",
-        get_size=13,
+        get_size=900,
+        size_units="meters",
+        size_min_pixels=0,
+        size_max_pixels=15,
         get_color=[20, 20, 20, 255],
-        get_alignment_baseline="'bottom'",
-        get_pixel_offset=[0, -16],
+        get_alignment_baseline="bottom",
+        get_pixel_offset=[0, -14],
+        character_set="auto",
+        font_family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif",
         billboard=True,
     )
     view_state = pdk.ViewState(
