@@ -458,8 +458,10 @@ def render_results():
 
         map_rows = []
         for name, (lat, lon) in coords_map.items():
-            # 추천 스팟과 같은 지역의 스팟만 지도에 표시 -> 자동으로 그 지역 범위에 맞춰 확대됨
-            if best_region is not None and REGION_OF.get(name) != best_region:
+            # 추천 스팟과 같은 지역의 스팟은 지도에 표시 -> 자동으로 그 지역 범위에 맞춰 확대됨
+            # 단, ±1단계 추천 스팟은 다른 지역이어도 항상 함께 표시
+            is_adjacent = name in adjacent_spot_names
+            if best_region is not None and REGION_OF.get(name) != best_region and not is_adjacent:
                 continue
             is_best = (name == best_spot['스팟'])
             map_rows.append({
