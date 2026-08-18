@@ -2,13 +2,12 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
-import re
 
 # =====================================================================
 # Ocean ICT Festival 출품작 - 서핑 환경 예측 및 추천 시스템 (웹 대시보드)
 # SurfScience.com의 '파고(ft) x 파도 형태(Pitching/Rolling)' 2축 모델 적용
 # 종합 점수는 변수별 기여 점수로 세분화 + 지형 기반 난이도 등급
-# + 사용자 실력(별점) 기반 맞춤 추천
+# + 사용자 실력(별점) 기반 맞춤 추천 + 실력 ±1단계 추천 + 지도 강조
 # =====================================================================
 
 # --- 데이터 수집 함수 (안정성 강화: 타임아웃 확대 + 재시도 로직) ---
@@ -93,13 +92,6 @@ def calculate_wave_shape_score(wave_period, wind_speed_kph, wind_direction, beac
 
 # --- 종합 점수 (변수별 기여 점수로 세분화, 총 100점 만점) ---
 def calculate_score(data, shape_score):
-    '''
-    - 파고 점수 (최대 30점): 1.2m 근처를 정점으로 하는 삼각형 함수
-    - 주기 점수 (최대 25점): 주기가 길수록 유리 (10초 이상이면 만점)
-    - 기온 점수 (최대 20점): 22도 근처를 정점으로
-    - 바람 점수 (최대 15점): 약할수록 유리
-    - 파도형태 점수 (최대 10점): 적당히 Pitching(약 +20)한 파도를 정점으로
-    '''
     wh, wp, temp, wind = data['wave_height'], data['wave_period'], data['temp'], data['wind_speed']
 
     height_score = max(0, 30 - abs(wh - 1.2) * 15)
@@ -120,21 +112,15 @@ def calculate_score(data, shape_score):
 
 # --- 서핑 난이도 계산 (해저 지형 + 실시간 해양 데이터 기반) ---
 def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shape_score, has_rip_current=False):
-    '''
-    해변의 지형 및 실시간 해양 데이터를 기반으로 서핑 난이도를 계산합니다.
-    반환: (최종 난이도 점수 0~100, 난이도 등급 문자열, 권장 대상, 난이도 등급 숫자 1~5)
-    '''
     score = 0
 
-    # 1. 해저 지형 점수 (최대 35점)
     if bottom_type == 'reef':
         score += 35
     elif bottom_type == 'pebble':
         score += 20
-    else:  # 'sand'
+    else:
         score += 10
 
-    # 2. 파고 점수 (최대 30점)
     if wave_height_m >= 2.5:
         score += 30
     elif wave_height_m >= 1.5:
@@ -144,7 +130,6 @@ def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shap
     else:
         score += 5
 
-    # 3. 파도 가파름 및 에너지 점수 (최대 20점)
     if wave_period >= 9 or wave_shape_score >= 40:
         score += 20
     elif wave_period >= 6 or wave_shape_score >= 0:
@@ -152,7 +137,6 @@ def calculate_spot_difficulty(bottom_type, wave_height_m, wave_period, wave_shap
     else:
         score += 5
 
-    # 4. 해류 및 위험요소 점수 (최대 15점)
     if has_rip_current:
         score += 15
 
@@ -186,7 +170,6 @@ BOARD_CHART = [
 ]
 
 def get_board_from_chart(height_ft, shape_score):
-    '''파고(ft)와 파도 형태 점수를 SurfScience 차트의 10개 보드 좌표와 비교해 가장 가까운 보드를 찾습니다.'''
     best_board, best_desc, best_dist = None, None, float('inf')
     for name, bx, by, desc in BOARD_CHART:
         dx = (height_ft - bx) / 12.0
@@ -210,19 +193,45 @@ def get_recommendations(data, beach_angle):
 
     return board, board_desc, gear, height_ft, shape_score, shape_type
 
-# --- 초보자용 보드 오버라이드 ---
 def apply_skill_board_override(board, board_desc, user_level_num, diff_level_num):
-    '''
-    사용자가 자신의 실력보다 훨씬 어려운 스팟을 볼 경우, 차트 매칭 보드 대신
-    안전한 입문용 보드를 우선 안내합니다 (초급자 보호 목적).
-    '''
     if user_level_num <= 2 and diff_level_num >= 4:
         return ("롱보드 (Longboard) - 안전 우선 추천", "이 스팟은 실력 대비 파도가 강합니다. 입문자는 롱보드로 안전한 구역에서만 연습하거나 다른 스팟을 고려하세요.")
     return board, board_desc
 
+def pick_best_for_level(df, level_num):
+    '''주어진 난이도 숫자(level_num)에 해당하는 스팟 중 종합 점수가 가장 높은 스팟을 반환. 없으면 None.'''
+    subset = df[df["난이도 숫자"] == level_num]
+    if subset.empty:
+        return None
+    return subset.sort_values(by="종합 점수", ascending=False).iloc[0]
+
+# --- 바다 느낌 배경 CSS ---
+def apply_ocean_background():
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background: linear-gradient(180deg, #E3F6FD 0%, #A6E1FA 25%, #4FC3E8 55%, #0E7FB0 80%, #075E85 100%);
+            background-attachment: fixed;
+        }
+        [data-testid="stHeader"] {
+            background: rgba(255, 255, 255, 0);
+        }
+        .block-container {
+            background: rgba(255, 255, 255, 0.78);
+            border-radius: 18px;
+            padding: 2rem 2.5rem;
+            margin-top: 1rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 # --- 메인 앱 로직 ---
 def main():
     st.set_page_config(page_title="서핑 가자~~~!", page_icon="\U0001F3C4", layout="wide")
+    apply_ocean_background()
 
     st.title("\U0001F30A 해양 기상 기반 서핑 환경 예측 시스템")
     st.markdown("Ocean ICT Festival 프로젝트 출품작 | 실력 맞춤형 스팟 & 보드 추천")
@@ -270,7 +279,7 @@ def main():
     if st.button("\U0001F30A 실시간 서핑 환경 데이터 분석 시작", type="primary"):
         progress_bar = st.progress(0, text="데이터를 불러오는 중입니다...")
         results = []
-        map_data = []
+        coords_map = {}
         total = len(spots)
 
         for i, (name, coords) in enumerate(spots.items()):
@@ -282,7 +291,6 @@ def main():
             )
             board, board_desc = apply_skill_board_override(board, board_desc, user_level_num, diff_level_num)
 
-            # 사용자 실력과의 적합도
             if diff_level_num == user_level_num:
                 fit = "\u2705 딱 맞음"
             elif diff_level_num > user_level_num:
@@ -311,8 +319,8 @@ def main():
                 "권장 대상": diff_target,
                 "내 실력 적합도": fit,
             })
+            coords_map[name] = (coords['lat'], coords['lon'])
 
-            map_data.append({"lat": coords['lat'], "lon": coords['lon']})
             progress_bar.progress((i + 1) / total, text=f"{name} 데이터 분석 완료 ({i+1}/{total})")
             time.sleep(0.15)
 
@@ -323,7 +331,6 @@ def main():
         # --- 사용자 실력에 맞는 스팟 우선 추천 ---
         matched_df = df[df["난이도 숫자"] == user_level_num]
         if matched_df.empty:
-            # 정확히 맞는 스팟이 없으면 난이도 차이가 가장 적은 스팟들 중 종합 점수 1위 선택
             df["_diff_gap"] = (df["난이도 숫자"] - user_level_num).abs()
             min_gap = df["_diff_gap"].min()
             matched_df = df[df["_diff_gap"] == min_gap]
@@ -343,6 +350,36 @@ def main():
         st.info(f"\U0001F4A1 **보드 선정 이유:** {best_spot['보드 설명']}")
         st.info(f"\U0001F457 **필수 준비물:** {best_spot['추천 준비물']}")
         st.warning(f"\U0001F3C3 **권장 대상:** {best_spot['권장 대상']} (난이도 점수 {best_spot['난이도 점수']}/100, 내 실력 적합도: {best_spot['내 실력 적합도']})")
+
+        # --- 실력 ±1단계 추천 ---
+        st.markdown("### \U0001F504 내 실력 ±1단계 추천 스팟")
+        lower_level = user_level_num - 1
+        upper_level = user_level_num + 1
+        adj_col1, adj_col2 = st.columns(2)
+
+        with adj_col1:
+            st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
+            if lower_level < 1:
+                st.caption("이미 가장 쉬운 Level 1을 선택하셨습니다.")
+            else:
+                pick = pick_best_for_level(df, lower_level)
+                if pick is None:
+                    st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
+                else:
+                    st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                    st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
+
+        with adj_col2:
+            st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
+            if upper_level > 5:
+                st.caption("이미 가장 어려운 Level 5를 선택하셨습니다.")
+            else:
+                pick = pick_best_for_level(df, upper_level)
+                if pick is None:
+                    st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
+                else:
+                    st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
+                    st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
 
         # --- 종합 점수 상세 내역 ---
         with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
@@ -369,8 +406,18 @@ def main():
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
         with col_map:
-            st.markdown("### \u200B서핑 스팟 위치")
-            st.map(pd.DataFrame(map_data))
+            st.markdown("### \u200B서핑 스팟 위치 (\U0001F534 = 오늘의 추천 스팟)")
+            map_rows = []
+            for name, (lat, lon) in coords_map.items():
+                is_best = (name == best_spot['스팟'])
+                map_rows.append({
+                    "lat": lat,
+                    "lon": lon,
+                    "color": "#FF3B30" if is_best else "#1E88E5",
+                    "size": 4000 if is_best else 900
+                })
+            map_df = pd.DataFrame(map_rows)
+            st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
 
 if __name__ == '__main__':
     main()
