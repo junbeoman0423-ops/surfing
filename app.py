@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import pydeck as pdk
 
 # =====================================================================
 # Ocean ICT Festival 출품작 - 서핑 환경 예측 및 추천 시스템 (웹 대시보드)
@@ -178,6 +179,73 @@ def pick_best_for_level(df, level_num):
     if subset.empty:
         return None
     return subset.sort_values(by="종합 점수", ascending=False).iloc[0]
+
+RED = [255, 59, 48, 230]
+GREEN = [52, 199, 89, 230]
+BLUE = [30, 136, 229, 190]
+
+def compute_zoom_and_center(points):
+    '''표시할 지점들의 위경도 범위를 보고 중심 좌표와 줌 레벨을 계산합니다.'''
+    lats = [p["lat"] for p in points]
+    lons = [p["lon"] for p in points]
+    lat_span = (max(lats) - min(lats)) if len(lats) > 1 else 0.05
+    lon_span = (max(lons) - min(lons)) if len(lons) > 1 else 0.05
+    span = max(lat_span, lon_span, 0.05)
+
+    if span > 3:
+        zoom = 6.0
+    elif span > 1.5:
+        zoom = 6.8
+    elif span > 0.8:
+        zoom = 7.6
+    elif span > 0.4:
+        zoom = 8.4
+    elif span > 0.2:
+        zoom = 9.1
+    elif span > 0.1:
+        zoom = 9.8
+    else:
+        zoom = 10.4
+
+    zoom = max(5.5, zoom - 0.9)  # 요청대로 조금 덜 확대
+    center_lat = sum(lats) / len(lats)
+    center_lon = sum(lons) / len(lons)
+    return center_lat, center_lon, zoom
+
+def render_labeled_map(points):
+    '''pydeck으로 마커 + 지점 이름 라벨을 함께 그리는 지도.'''
+    center_lat, center_lon, zoom = compute_zoom_and_center(points)
+
+    point_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=points,
+        get_position="[lon, lat]",
+        get_fill_color="color",
+        get_radius="radius",
+        radius_min_pixels=5,
+        radius_max_pixels=40,
+        pickable=True,
+    )
+    text_layer = pdk.Layer(
+        "TextLayer",
+        data=points,
+        get_position="[lon, lat]",
+        get_text="label",
+        get_size=13,
+        get_color=[30, 30, 30, 255],
+        get_pixel_offset=[0, -14],
+        get_text_anchor='"middle"',
+        get_alignment_baseline='"bottom"',
+    )
+    view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=zoom, pitch=0)
+    deck = pdk.Deck(
+        layers=[point_layer, text_layer],
+        initial_view_state=view_state,
+        map_provider="carto",
+        map_style="light",
+        tooltip={"text": "{label}"},
+    )
+    st.pydeck_chart(deck)
 
 SPOTS = {
     "양양 (죽도해수욕장)":       {"lat": 38.011, "lon": 128.761, "angle": 70,  "bottom": "sand",   "rip": False},
@@ -392,36 +460,32 @@ def render_results():
 
     st.markdown("### \U0001F504 내 실력 ±1단계 추천 스팟")
     lower_level, upper_level = user_level_num - 1, user_level_num + 1
+    lower_pick, upper_pick = None, None
     adj_col1, adj_col2 = st.columns(2)
-
-    # ±1단계 추천 스팟 이름을 저장 (지도에서 초록색으로 표시하기 위함)
-    adjacent_spot_names = set()
 
     with adj_col1:
         st.markdown(f"**\U0001F343 한 단계 쉬운 스팟 (Level {lower_level})**")
         if lower_level < 1:
             st.caption("이미 가장 쉬운 Level 1을 선택하셨습니다.")
         else:
-            pick = pick_best_for_level(df, lower_level)
-            if pick is None:
+            lower_pick = pick_best_for_level(df, lower_level)
+            if lower_pick is None:
                 st.caption(f"Level {lower_level}에 해당하는 스팟이 오늘은 없습니다.")
             else:
-                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
-                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
-                adjacent_spot_names.add(pick['스팟'])
+                st.markdown(f"**{lower_pick['스팟']}** ({lower_pick['종합 점수']}점)")
+                st.caption(f"{lower_pick['추천 보드']} · 파고 {lower_pick['파고 (ft)']}ft · {lower_pick['파도 형태']}")
 
     with adj_col2:
         st.markdown(f"**\u26A0\uFE0F 한 단계 도전적인 스팟 (Level {upper_level})**")
         if upper_level > 5:
             st.caption("이미 가장 어려운 Level 5를 선택하셨습니다.")
         else:
-            pick = pick_best_for_level(df, upper_level)
-            if pick is None:
+            upper_pick = pick_best_for_level(df, upper_level)
+            if upper_pick is None:
                 st.caption(f"Level {upper_level}에 해당하는 스팟이 오늘은 없습니다.")
             else:
-                st.markdown(f"**{pick['스팟']}** ({pick['종합 점수']}점)")
-                st.caption(f"{pick['추천 보드']} · 파고 {pick['파고 (ft)']}ft · {pick['파도 형태']}")
-                adjacent_spot_names.add(pick['스팟'])
+                st.markdown(f"**{upper_pick['스팟']}** ({upper_pick['종합 점수']}점)")
+                st.caption(f"{upper_pick['추천 보드']} · 파고 {upper_pick['파고 (ft)']}ft · {upper_pick['파도 형태']}")
 
     with st.expander(f"\U0001F4CA {best_spot['스팟']} 점수 상세 내역 (총 {best_spot['종합 점수']}점 / 100점)"):
         bc1, bc2, bc3, bc4, bc5 = st.columns(5)
@@ -447,41 +511,57 @@ def render_results():
 
     with col_map:
         best_region = REGION_OF.get(best_spot['스팟'], None)
-        st.markdown(f"### \u200B{best_region or ''} 지역 확대 (\U0001F534 = 오늘의 추천 스팟, \U0001F7E2 = ±1단계 추천 스팟)")
+        st.markdown(f"### \u200B{best_region or ''} 지역 지도")
+        st.caption("\U0001F534 오늘의 추천 스팟 · \U0001F7E2 실력 ±1단계 추천 스팟 · \U0001F535 그 외 스팟")
 
-        def spot_color(name, is_best):
-            if is_best:
-                return "#FF3B30"       # 오늘의 추천 스팟: 빨강
-            if name in adjacent_spot_names:
-                return "#2ECC71"       # ±1단계 추천 스팟: 초록
-            return "#1E88E5"           # 나머지: 파랑
+        lower_name = lower_pick['스팟'] if lower_pick is not None else None
+        upper_name = upper_pick['스팟'] if upper_pick is not None else None
 
-        map_rows = []
+        # 1) 추천 스팟과 같은 지역의 스팟들을 기본으로 표시
+        display_points = []
+        included_names = set()
         for name, (lat, lon) in coords_map.items():
-            # 추천 스팟과 같은 지역의 스팟은 지도에 표시 -> 자동으로 그 지역 범위에 맞춰 확대됨
-            # 단, ±1단계 추천 스팟은 다른 지역이어도 항상 함께 표시
-            is_adjacent = name in adjacent_spot_names
-            if best_region is not None and REGION_OF.get(name) != best_region and not is_adjacent:
+            if best_region is not None and REGION_OF.get(name) != best_region:
                 continue
             is_best = (name == best_spot['스팟'])
-            map_rows.append({
-                "lat": lat, "lon": lon,
-                "color": spot_color(name, is_best),
-                "size": 3500 if is_best else (2200 if name in adjacent_spot_names else 700)
+            display_points.append({
+                "lat": lat, "lon": lon, "label": name,
+                "color": RED if is_best else BLUE,
+                "radius": 1400 if is_best else 500,
             })
-        map_df = pd.DataFrame(map_rows)
-        st.map(map_df, latitude="lat", longitude="lon", color="color", size="size")
+            included_names.add(name)
+
+        # 2) 실력 ±1단계 추천 스팟이 다른 지역이라도 초록색으로 추가 표시
+        for pick_name in [lower_name, upper_name]:
+            if pick_name is None or pick_name in included_names:
+                continue
+            if pick_name in coords_map:
+                lat, lon = coords_map[pick_name]
+                display_points.append({
+                    "lat": lat, "lon": lon, "label": pick_name,
+                    "color": GREEN, "radius": 900,
+                })
+                included_names.add(pick_name)
+
+        # 이미 지역 안에 포함된 ±1단계 스팟은 초록색으로 색만 덮어씌움
+        for p in display_points:
+            if p["label"] in (lower_name, upper_name) and p["label"] != best_spot['스팟']:
+                p["color"] = GREEN
+                p["radius"] = max(p["radius"], 900)
+
+        render_labeled_map(display_points)
 
         with st.expander("\U0001F30D 전체 20개 스팟 지도 보기"):
-            full_map_rows = []
+            full_points = []
             for name, (lat, lon) in coords_map.items():
-                is_best = (name == best_spot['스팟'])
-                full_map_rows.append({
-                    "lat": lat, "lon": lon,
-                    "color": spot_color(name, is_best),
-                    "size": 4000 if is_best else (2500 if name in adjacent_spot_names else 900)
-                })
-            st.map(pd.DataFrame(full_map_rows), latitude="lat", longitude="lon", color="color", size="size")
+                if name == best_spot['스팟']:
+                    color, radius = RED, 1600
+                elif name in (lower_name, upper_name):
+                    color, radius = GREEN, 1000
+                else:
+                    color, radius = BLUE, 500
+                full_points.append({"lat": lat, "lon": lon, "label": name, "color": color, "radius": radius})
+            render_labeled_map(full_points)
 
 # --- 메인 앱 로직 ---
 def main():
